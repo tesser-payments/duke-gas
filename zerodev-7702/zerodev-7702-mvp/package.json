@@ -1,0 +1,32 @@
+{
+  "name": "zerodev-7702-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@zerodev/ecdsa-validator": "^5.4.9",
+    "@zerodev/sdk": "^5.5.8",
+    "abitype": "^1.2.3",
+    "next": "16.2.1",
+    "permissionless": "^0.3.4",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "viem": "^2.47.6",
+    "wagmi": "^3.6.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.1",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}

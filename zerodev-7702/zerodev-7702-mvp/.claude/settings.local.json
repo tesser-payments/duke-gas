@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run dev)",
+      "mcp__ide__getDiagnostics",
+      "Bash(npm ls @zerodev/sdk)",
+      "Bash(node -e \"console.log(Object.keys(require(''@zerodev/sdk'')))\")",
+      "Bash(node -e \"console.log(require(''@zerodev/sdk'').constants)\")",
+      "Bash(npm install permissionless)",
+      "Bash(node -e \"console.log(Object.keys(require(''permissionless'')))\")",
+      "Bash(node -e \"console.log(Object.keys(require(''permissionless/utils'')))\")",
+      "Bash(node -e \"console.log(Object.keys(require(''permissionless/clients'')))\")",
+      "Bash(node -e \"console.log(require(''@zerodev/sdk'').constants.getEntryPoint)\")",
+      "Bash(node -e \"console.log(require(''@zerodev/sdk'').constants.getEntryPoint(''0.7.0''))\")",
+      "Bash(node -e \"console.log(Object.keys(require(''@zerodev/sdk'').constants.getEntryPoint))\")",
+      "Bash(node -e \"console.log(require(''@zerodev/sdk'').constants.getEntryPoint(''v0.7''))\")",
+      "WebFetch(domain:7702.zerodev.app)",
+      "Bash(node -e \"console.log(Object.keys(require(''@zerodev/sdk'')))\")",
+      "Bash(npm run build)",
+      "Bash(node -e \"console.log(Object.keys(require(''@zerodev/ecdsa-validator'')))\")",
+      "Bash(node -e \"console.log(require(''@zerodev/sdk'').constants.getEntryPoint(''v0.7''))\")"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

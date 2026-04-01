@@ -1,3 +1,4 @@
 payments.ts
 ./gitignore
 ./gas-research/.env
+./env
