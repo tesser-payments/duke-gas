@@ -356,11 +356,3 @@ Implement constraints in Turnkey:
 * Maximum transaction amounts
 
 This enables **secure gas sponsorship policies**
-
----
-
-## Conclusion
-
-This MVP successfully validates that:
-
-**An EOA can be transformed into a smart account via EIP-7702 and execute transactions through ZeroDev with paymaster-sponsored gas.**
