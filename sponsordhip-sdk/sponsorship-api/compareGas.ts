@@ -10,7 +10,7 @@ import {
   type Hex,
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { sepolia } from 'viem/chains';
+import { polygon } from 'viem/chains';
 
 import {
   createKernelAccount,
@@ -119,13 +119,13 @@ if (!zeroDevRpc) {
 const account = privateKeyToAccount(privateKey);
 
 const publicClient: any = createPublicClient({
-  chain: sepolia,
+  chain: polygon,
   transport: http(rpcUrl),
 });
 
 const walletClient: any = createWalletClient({
   account,
-  chain: sepolia,
+  chain: polygon,
   transport: http(rpcUrl),
 });
 
@@ -172,7 +172,7 @@ function ensureCsvHeader() {
   fs.writeFileSync(csvFile, header + '\n', 'utf8');
 }
 
-function appendCsvRow(row: Record<string, string | number>) {
+function appendCsvRow(row: Record<string, string | number | bigint>) {
   const values = [
     row.timestamp,
     row.runIndex,
@@ -222,7 +222,7 @@ async function sendUnsponsoredTx(): Promise<UnsponsoredResult> {
     account,
     to: toAddress,
     value: 0n,
-    chain: sepolia,
+    chain: polygon,
   });
 
   console.log('Unsponsored tx hash:', hash);
@@ -259,13 +259,13 @@ async function createSigningKernelClient() {
   });
 
   const paymasterClient = createZeroDevPaymasterClient({
-    chain: sepolia,
+    chain: polygon,
     transport: http(zeroDevRpc),
   });
 
   const kernelClient = createKernelAccountClient({
     account: kernelAccount,
-    chain: sepolia,
+    chain: polygon,
     bundlerTransport: http(zeroDevRpc),
     client: publicClient,
     userOperation: {
@@ -283,7 +283,9 @@ async function createSigningKernelClient() {
   return { kernelClient };
 }
 
-async function prepareSponsoredUserOp(): Promise<Record<string, any>> {
+async function prepareSponsoredUserOp(
+  type: 'verifying' | 'erc20',
+): Promise<Record<string, any>> {
   printDivider('Calling /sponsorships/prepare');
 
   const res = await fetch(`${sponsorApiBaseUrl}/sponsorships/prepare`, {
@@ -297,6 +299,7 @@ async function prepareSponsoredUserOp(): Promise<Record<string, any>> {
       to: toAddress,
       data: '0x',
       value: '0',
+      type,
     }),
   });
 
@@ -410,10 +413,12 @@ async function tryGetSponsoredReceipt(txHash: string | null) {
   };
 }
 
-async function sendSponsoredTx(): Promise<SponsoredResult> {
+async function sendSponsoredTx(
+  type: 'verifying' | 'erc20',
+): Promise<SponsoredResult> {
   const start = Date.now();
 
-  const unsignedUserOp = await prepareSponsoredUserOp();
+  const unsignedUserOp = await prepareSponsoredUserOp(type);
 
   const gasBreakdown = {
     callGasLimit: String(unsignedUserOp.callGasLimit ?? ''),
@@ -563,52 +568,90 @@ async function runOnce(runIndex: number) {
     latencyMs: unsponsored.latencyMs,
   });
 
-  const sponsored = await sendSponsoredTx();
+  const verifying = await sendSponsoredTx('verifying');
 
-  printDivider('Sponsored Result');
+  printDivider('Verifying Result');
   console.log({
-    userOpHash: sponsored.userOpHash,
-    txHash: sponsored.txHash,
-    latencyMs: sponsored.latencyMs,
+    userOpHash: verifying.userOpHash,
+    txHash: verifying.txHash,
+    latencyMs: verifying.latencyMs,
   });
 
-  if (sponsored.sponsoredReceipt) {
-    printDivider('Sponsored On-chain Cost');
+  if (verifying.sponsoredReceipt) {
+    printDivider('Verifying On-chain Cost');
     console.log({
-      txHash: sponsored.sponsoredReceipt.txHash,
-      gasUsed: sponsored.sponsoredReceipt.gasUsed.toString(),
+      txHash: verifying.sponsoredReceipt.txHash,
+      gasUsed: verifying.sponsoredReceipt.gasUsed.toString(),
       effectiveGasPrice:
-        sponsored.sponsoredReceipt.effectiveGasPrice.toString(),
-      actualFeeWei: sponsored.sponsoredReceipt.actualFeeWei.toString(),
-      actualFeeETH: formatEther(sponsored.sponsoredReceipt.actualFeeWei),
+        verifying.sponsoredReceipt.effectiveGasPrice.toString(),
+      actualFeeWei: verifying.sponsoredReceipt.actualFeeWei.toString(),
+      actualFeeETH: formatEther(verifying.sponsoredReceipt.actualFeeWei),
     });
   } else {
-    printDivider('Sponsored On-chain Cost');
+    printDivider('Verifying On-chain Cost');
     console.log({
-      note: 'Sponsored txHash not returned yet, so sponsored on-chain cost is unavailable in this run.',
+      note: 'Verifying txHash not returned yet, so on-chain cost is unavailable in this run.',
     });
   }
 
-  printDivider('Sponsored Gas Breakdown');
-  console.log(sponsored.gasBreakdown);
+  printDivider('Verifying Gas Breakdown');
+  console.log(verifying.gasBreakdown);
+
+  const erc20 = await sendSponsoredTx('erc20');
+
+  printDivider('ERC20 Result');
+  console.log({
+    userOpHash: erc20.userOpHash,
+    txHash: erc20.txHash,
+    latencyMs: erc20.latencyMs,
+  });
+
+  if (erc20.sponsoredReceipt) {
+    printDivider('ERC20 On-chain Cost');
+    console.log({
+      txHash: erc20.sponsoredReceipt.txHash,
+      gasUsed: erc20.sponsoredReceipt.gasUsed.toString(),
+      effectiveGasPrice: erc20.sponsoredReceipt.effectiveGasPrice.toString(),
+      actualFeeWei: erc20.sponsoredReceipt.actualFeeWei.toString(),
+      actualFeeETH: formatEther(erc20.sponsoredReceipt.actualFeeWei),
+    });
+  } else {
+    printDivider('ERC20 On-chain Cost');
+    console.log({
+      note: 'ERC20 txHash not returned yet, so on-chain cost is unavailable in this run.',
+    });
+  }
+
+  printDivider('ERC20 Gas Breakdown');
+  console.log(erc20.gasBreakdown);
 
   printDivider('Comparison');
   console.log({
     unsponsoredNetworkCostWei: unsponsored.actualFeeWei.toString(),
     unsponsoredNetworkCostETH: formatEther(unsponsored.actualFeeWei),
 
-    sponsoredNetworkCostWei: sponsored.sponsoredReceipt
-      ? sponsored.sponsoredReceipt.actualFeeWei.toString()
+    verifyingNetworkCostWei: verifying.sponsoredReceipt
+      ? verifying.sponsoredReceipt.actualFeeWei.toString()
       : 'N/A',
-    sponsoredNetworkCostETH: sponsored.sponsoredReceipt
-      ? formatEther(sponsored.sponsoredReceipt.actualFeeWei)
+    verifyingNetworkCostETH: verifying.sponsoredReceipt
+      ? formatEther(verifying.sponsoredReceipt.actualFeeWei)
+      : 'N/A',
+
+    erc20NetworkCostWei: erc20.sponsoredReceipt
+      ? erc20.sponsoredReceipt.actualFeeWei.toString()
+      : 'N/A',
+    erc20NetworkCostETH: erc20.sponsoredReceipt
+      ? formatEther(erc20.sponsoredReceipt.actualFeeWei)
       : 'N/A',
 
     unsponsoredUserPaysWei: unsponsored.actualFeeWei.toString(),
     unsponsoredUserPaysETH: formatEther(unsponsored.actualFeeWei),
 
-    sponsoredUserPaysWei: '0',
-    sponsoredUserPaysETH: '0',
+    verifyingUserPaysWei: '0',
+    verifyingUserPaysETH: '0',
+
+    erc20UserPaysWei: 'TODO',
+    erc20UserPaysETH: 'TODO',
   });
 
   appendCsvRow({
@@ -622,29 +665,29 @@ async function runOnce(runIndex: number) {
     unsponsoredActualFeeETH: formatEther(unsponsored.actualFeeWei),
     unsponsoredLatencyMs: unsponsored.latencyMs,
 
-    sponsoredUserOpHash: sponsored.userOpHash ?? '',
-    sponsoredTxHash: sponsored.txHash ?? '',
-    sponsoredGasUsed: sponsored.sponsoredReceipt
-      ? sponsored.sponsoredReceipt.gasUsed.toString()
+    sponsoredUserOpHash: verifying.userOpHash ?? '',
+    sponsoredTxHash: verifying.txHash ?? '',
+    sponsoredGasUsed: verifying.sponsoredReceipt
+      ? verifying.sponsoredReceipt.gasUsed.toString()
       : '',
-    sponsoredEffectiveGasPriceWei: sponsored.sponsoredReceipt
-      ? sponsored.sponsoredReceipt.effectiveGasPrice.toString()
+    sponsoredEffectiveGasPriceWei: verifying.sponsoredReceipt
+      ? verifying.sponsoredReceipt.effectiveGasPrice.toString()
       : '',
-    sponsoredActualFeeWei: sponsored.sponsoredReceipt
-      ? sponsored.sponsoredReceipt.actualFeeWei.toString()
+    sponsoredActualFeeWei: verifying.sponsoredReceipt
+      ? verifying.sponsoredReceipt.actualFeeWei.toString()
       : '',
-    sponsoredActualFeeETH: sponsored.sponsoredReceipt
-      ? formatEther(sponsored.sponsoredReceipt.actualFeeWei)
+    sponsoredActualFeeETH: verifying.sponsoredReceipt
+      ? formatEther(verifying.sponsoredReceipt.actualFeeWei)
       : '',
-    sponsoredLatencyMs: sponsored.latencyMs,
+    sponsoredLatencyMs: verifying.latencyMs,
 
-    sponsoredCallGasLimit: sponsored.gasBreakdown.callGasLimit,
-    sponsoredVerificationGasLimit: sponsored.gasBreakdown.verificationGasLimit,
-    sponsoredPreVerificationGas: sponsored.gasBreakdown.preVerificationGas,
+    sponsoredCallGasLimit: verifying.gasBreakdown.callGasLimit,
+    sponsoredVerificationGasLimit: verifying.gasBreakdown.verificationGasLimit,
+    sponsoredPreVerificationGas: verifying.gasBreakdown.preVerificationGas,
     sponsoredPaymasterVerificationGasLimit:
-      sponsored.gasBreakdown.paymasterVerificationGasLimit,
+      verifying.gasBreakdown.paymasterVerificationGasLimit,
     sponsoredPaymasterPostOpGasLimit:
-      sponsored.gasBreakdown.paymasterPostOpGasLimit,
+      verifying.gasBreakdown.paymasterPostOpGasLimit,
 
     unsponsoredUserPaysWei: unsponsored.actualFeeWei.toString(),
     unsponsoredUserPaysETH: formatEther(unsponsored.actualFeeWei),
@@ -652,16 +695,57 @@ async function runOnce(runIndex: number) {
     sponsoredUserPaysETH: '0',
   });
 
-  printRunSummary(runIndex, unsponsored, sponsored);
+  appendCsvRow({
+    timestamp: new Date().toISOString(),
+    runIndex: `${runIndex}-erc20`,
+
+    unsponsoredTxHash: '',
+    unsponsoredGasUsed: '',
+    unsponsoredEffectiveGasPriceWei: '',
+    unsponsoredActualFeeWei: '',
+    unsponsoredActualFeeETH: '',
+    unsponsoredLatencyMs: '',
+
+    sponsoredUserOpHash: erc20.userOpHash ?? '',
+    sponsoredTxHash: erc20.txHash ?? '',
+    sponsoredGasUsed: erc20.sponsoredReceipt
+      ? erc20.sponsoredReceipt.gasUsed.toString()
+      : '',
+    sponsoredEffectiveGasPriceWei: erc20.sponsoredReceipt
+      ? erc20.sponsoredReceipt.effectiveGasPrice.toString()
+      : '',
+    sponsoredActualFeeWei: erc20.sponsoredReceipt
+      ? erc20.sponsoredReceipt.actualFeeWei.toString()
+      : '',
+    sponsoredActualFeeETH: erc20.sponsoredReceipt
+      ? formatEther(erc20.sponsoredReceipt.actualFeeWei)
+      : '',
+    sponsoredLatencyMs: erc20.latencyMs,
+
+    sponsoredCallGasLimit: erc20.gasBreakdown.callGasLimit,
+    sponsoredVerificationGasLimit: erc20.gasBreakdown.verificationGasLimit,
+    sponsoredPreVerificationGas: erc20.gasBreakdown.preVerificationGas,
+    sponsoredPaymasterVerificationGasLimit:
+      erc20.gasBreakdown.paymasterVerificationGasLimit,
+    sponsoredPaymasterPostOpGasLimit:
+      erc20.gasBreakdown.paymasterPostOpGasLimit,
+
+    unsponsoredUserPaysWei: '',
+    unsponsoredUserPaysETH: '',
+    sponsoredUserPaysWei: 'TODO',
+    sponsoredUserPaysETH: 'TODO',
+  });
+
+  printRunSummary(runIndex, unsponsored, verifying);
 
   return {
     unsponsoredFeeWei: unsponsored.actualFeeWei,
-    sponsoredFeeWei: sponsored.sponsoredReceipt
-      ? sponsored.sponsoredReceipt.actualFeeWei
+    sponsoredFeeWei: verifying.sponsoredReceipt
+      ? verifying.sponsoredReceipt.actualFeeWei
       : 0n,
     unsponsoredLatencyMs: unsponsored.latencyMs,
-    sponsoredLatencyMs: sponsored.latencyMs,
-    sponsoredHasReceipt: Boolean(sponsored.sponsoredReceipt),
+    sponsoredLatencyMs: verifying.latencyMs,
+    sponsoredHasReceipt: Boolean(verifying.sponsoredReceipt),
   };
 }
 

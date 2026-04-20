@@ -5,6 +5,7 @@ import {
   http,
   type Hex,
   type PrivateKeyAccount,
+  parseAbi,
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import {
@@ -15,7 +16,13 @@ import {
 } from '@zerodev/sdk';
 import { polygon, sepolia } from 'viem/chains';
 import { getUserOperationGasPrice } from '@zerodev/sdk/actions';
-
+function serializeUserOp(userOp: any) {
+  return JSON.parse(
+    JSON.stringify(userOp, (_, value) =>
+      typeof value === 'bigint' ? value.toString() : value,
+    ),
+  );
+}
 @Injectable()
 export class ZeroDevService {
   private readonly ZERODEV_RPC = process.env.ZERODEV_RPC as string;
@@ -203,66 +210,190 @@ export class ZeroDevService {
 
   async prepareUserOp(params: {
     from: string;
+    sender: string;
+    factory?: string;
+    factoryData?: string;
     to?: string;
     data?: `0x${string}`;
     value?: string;
     nonce?: number;
     gasLimit?: string;
     gasPrice?: string;
+    callData?: `0x${string}`;
     type?: 'verifying' | 'erc20';
   }) {
     const paymasterType = params.type ?? 'verifying';
+    const entryPoint = constants.getEntryPoint('0.7');
 
-    const { kernelClient, account, kernelAccount } =
-      await this.create7702Client(paymasterType);
+    if (!params.to) {
+      throw new Error('prepareUserOp requires params.to');
+    }
 
     const normalizedCall = {
-      to: params.to ?? null,
+      to: params.to,
       data: params.data ?? '0x',
       value: params.value ?? '0',
     };
 
-    const callData = await (kernelClient.account as any).encodeCalls([
-      {
-        to: params.to as `0x${string}`,
-        value: BigInt(params.value ?? '0'),
-        data: (params.data ?? '0x') as `0x${string}`,
-      },
-    ]);
-
-    const prepareArgs: any = {
-      callData,
-    };
+    let nonceHex: string;
 
     if (params.nonce !== undefined && params.nonce !== null) {
-      prepareArgs.nonce = BigInt(params.nonce);
+      nonceHex = this.toHex(params.nonce);
+      console.log('[prepareUserOp] params.nonce override =', params.nonce);
+      console.log('[prepareUserOp] nonceHex =', nonceHex);
+    } else {
+      try {
+        const publicClient = this.getPublicClient();
+
+        const nonceResult = await publicClient.readContract({
+          address: entryPoint.address as `0x${string}`,
+          abi: parseAbi([
+            'function getNonce(address sender, uint192 key) view returns (uint256)',
+          ]),
+          functionName: 'getNonce',
+          args: [params.sender as `0x${string}`, 0n],
+        });
+
+        console.log('[prepareUserOp] entryPoint.getNonce raw =', nonceResult);
+
+        nonceHex = this.toHex(nonceResult);
+
+        console.log('[prepareUserOp] nonceHex =', nonceHex);
+      } catch (error) {
+        console.error(
+          '[prepareUserOp] failed to fetch nonce from EntryPoint:',
+          error,
+        );
+        throw new Error('Failed to fetch smart account nonce');
+      }
     }
 
-    const userOp = await (kernelClient as any).prepareUserOperation(
-      prepareArgs,
-    );
-    // 如果外部有指定 gasLimit，就覆蓋 callGasLimit
+    let maxFeePerGas: string;
+    let maxPriorityFeePerGas: string;
+
+    if (params.gasPrice) {
+      maxFeePerGas = params.gasPrice;
+      maxPriorityFeePerGas = params.gasPrice;
+    } else {
+      try {
+        const gasPriceResult = await this.rpc(
+          'zd_getUserOperationGasPrice',
+          [],
+        );
+
+        console.log('[prepareUserOp] gasPriceResult =', gasPriceResult);
+
+        const rawMaxFeePerGas = BigInt(
+          gasPriceResult?.fast?.maxFeePerGas ??
+            gasPriceResult?.standard?.maxFeePerGas ??
+            gasPriceResult?.maxFeePerGas,
+        );
+
+        const rawMaxPriorityFeePerGas = BigInt(
+          gasPriceResult?.fast?.maxPriorityFeePerGas ??
+            gasPriceResult?.standard?.maxPriorityFeePerGas ??
+            gasPriceResult?.maxPriorityFeePerGas,
+        );
+
+        const bump = 120n; // +20%
+
+        maxFeePerGas = this.toHex((rawMaxFeePerGas * bump) / 100n);
+        maxPriorityFeePerGas = this.toHex(
+          (rawMaxPriorityFeePerGas * bump) / 100n,
+        );
+      } catch (error) {
+        console.error(
+          '[prepareUserOp] zd_getUserOperationGasPrice failed:',
+          error,
+        );
+        throw new Error('Failed to fetch user operation gas price');
+      }
+    }
+
+    const dummySignature =
+      '0xfffffffffffffffffffffffffffffff0000000000000000000000000000000007aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c';
+
+    const userOp: any = {
+      sender: params.sender,
+      nonce: nonceHex,
+      callData: (params.callData ?? '0x') as `0x${string}`,
+      signature: dummySignature,
+      maxFeePerGas,
+      maxPriorityFeePerGas,
+      factory: params.factory,
+      factoryData: params.factoryData,
+    };
+
     if (params.gasLimit) {
       userOp.callGasLimit = params.gasLimit;
     }
+    const paymasterClient = createZeroDevPaymasterClient({
+      chain: polygon,
+      transport: http(this.ZERODEV_RPC),
+    });
 
-    // 如果外部有指定 gasPrice，就先把它套進 fee 欄位
-    // 目前先採最保守做法：同時覆蓋 maxFeePerGas / maxPriorityFeePerGas
-    if (params.gasPrice) {
-      userOp.maxFeePerGas = params.gasPrice;
-      userOp.maxPriorityFeePerGas = params.gasPrice;
-    }
+    const sponsorResult =
+      paymasterType === 'erc20'
+        ? await paymasterClient.sponsorUserOperation({
+            userOperation: {
+              ...userOp,
+              entryPointAddress: entryPoint.address,
+            },
+            gasToken: this.POLYGON_USDC,
+          })
+        : await paymasterClient.sponsorUserOperation({
+            userOperation: {
+              ...userOp,
+              entryPointAddress: entryPoint.address,
+            },
+          });
+    console.log('[prepareUserOp] sponsorResult =', sponsorResult);
+    console.log(
+      '[prepareUserOp] sponsorResult keys =',
+      Object.keys(sponsorResult || {}),
+    );
 
+    Object.assign(userOp, sponsorResult);
+
+    console.log('[prepareUserOp] bumped maxFeePerGas =', userOp.maxFeePerGas);
+    console.log(
+      '[prepareUserOp] bumped maxPriorityFeePerGas =',
+      userOp.maxPriorityFeePerGas,
+    );
+
+    console.log('[prepareUserOp] requestedFrom:', params.from);
+    console.log('[prepareUserOp] requestedSender:', params.sender);
+    console.log('[prepareUserOp] raw params.data:', params.data);
+    console.log('[prepareUserOp] raw params.callData:', params.callData);
+    console.log('[prepareUserOp] preparedSender:', userOp.sender);
+    console.log('[prepareUserOp] preparedNonce:', userOp.nonce);
+    console.log('[prepareUserOp] preparedCallData:', userOp.callData);
+    console.log('[prepareUserOp] factory:', userOp.factory);
+    console.log(
+      '[prepareUserOp] factoryData exists:',
+      Boolean(userOp.factoryData),
+    );
+
+    console.log('[prepareUserOp] final userOp =', userOp);
+    console.log(
+      '[prepareUserOp] final userOp keys =',
+      Object.keys(userOp || {}),
+    );
+    console.log('[prepareUserOp] final maxFeePerGas =', maxFeePerGas);
+    console.log(
+      '[prepareUserOp] final maxPriorityFeePerGas =',
+      maxPriorityFeePerGas,
+    );
     return {
       stage: 'prepared',
       sponsorEnabled: true,
       sponsorType: paymasterType,
       requestedFrom: params.from,
-      actualSignerAddress: account.address,
-      kernelAccountAddress: kernelAccount.address,
+      actualSignerAddress: params.from,
+      kernelAccountAddress: params.sender,
       call: normalizedCall,
-      userOp,
-      note: 'ZeroDev handled gas + paymaster automatically via kernelClient. User-supplied gasLimit/gasPrice override prepared values when provided.',
+      userOp: serializeUserOp(userOp),
+      note: 'Prepared from frontend-supplied sender. Frontend must sign the exact returned userOp.',
     };
   }
 
@@ -328,6 +459,7 @@ export class ZeroDevService {
         txHash,
       };
     } catch (error: any) {
+      console.error('[submitUserOp] failed:', error);
       return {
         userOpHash: null,
         txHash: null,

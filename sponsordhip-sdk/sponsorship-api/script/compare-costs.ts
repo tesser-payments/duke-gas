@@ -204,11 +204,6 @@ async function createSigningKernelClient() {
     eip7702Account: account,
   });
 
-  const paymasterClient = createZeroDevPaymasterClient({
-    chain: polygon,
-    transport: http(ZERODEV_RPC),
-  });
-
   const kernelClient = createKernelAccountClient({
     account: kernelAccount,
     chain: polygon,
@@ -217,11 +212,6 @@ async function createSigningKernelClient() {
     userOperation: {
       estimateFeesPerGas: async ({ bundlerClient }: any) => {
         return getUserOperationGasPrice(bundlerClient);
-      },
-    },
-    paymaster: {
-      getPaymasterData: async (userOperation: any) => {
-        return paymasterClient.sponsorUserOperation({ userOperation });
       },
     },
   });
@@ -262,7 +252,9 @@ async function createErc20KernelClient() {
   return { kernelClient, paymasterClient, entryPoint };
 }
 
-async function callPrepareVerifying(): Promise<PrepareResponse> {
+async function callPrepare(
+  type: 'verifying' | 'erc20',
+): Promise<PrepareResponse> {
   const data = buildTransferData();
 
   const response = await fetch(`${API_BASE_URL}/sponsorships/prepare`, {
@@ -276,7 +268,7 @@ async function callPrepareVerifying(): Promise<PrepareResponse> {
       to: ERC20_TOKEN,
       data,
       value: '0',
-      type: 'verifying',
+      type,
     }),
   });
 
@@ -313,6 +305,9 @@ async function signUserOperation(userOp: Record<string, any>) {
 
     factory: signedUserOp.factory,
     factoryData: signedUserOp.factoryData,
+
+    authorization: signedUserOp.authorization,
+
     signature: '0x',
   });
 
@@ -320,41 +315,77 @@ async function signUserOperation(userOp: Record<string, any>) {
   return signedUserOp;
 }
 
-async function sdkSubmitUserOp(
+async function apiSubmitUserOp(
   signedUserOp: Record<string, any>,
 ): Promise<SubmitResponse> {
-  const { kernelClient } = await createSigningKernelClient();
-
-  const userOpHash = await (kernelClient as any).sendUserOperation({
-    sender: signedUserOp.sender,
-    nonce: signedUserOp.nonce,
-    callData: signedUserOp.callData,
-    signature: signedUserOp.signature,
-
-    callGasLimit: signedUserOp.callGasLimit,
-    verificationGasLimit: signedUserOp.verificationGasLimit,
-    preVerificationGas: signedUserOp.preVerificationGas,
-
-    maxFeePerGas: signedUserOp.maxFeePerGas,
-    maxPriorityFeePerGas: signedUserOp.maxPriorityFeePerGas,
-
-    paymaster: signedUserOp.paymaster,
-    paymasterVerificationGasLimit: signedUserOp.paymasterVerificationGasLimit,
-    paymasterPostOpGasLimit: signedUserOp.paymasterPostOpGasLimit,
-    paymasterData: signedUserOp.paymasterData,
-
-    factory: signedUserOp.factory,
-    factoryData: signedUserOp.factoryData,
-
-    authorization: signedUserOp.authorization,
+  const response = await fetch(`${API_BASE_URL}/sponsorships/submit`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-API-KEY': API_KEY,
+    },
+    body: JSON.stringify({
+      signedUserOp,
+    }),
   });
 
-  const receipt = await waitForUserOperationReceipt(userOpHash);
-  const txHash = receipt?.receipt?.transactionHash ?? null;
+  const json: any = await response.json();
+
+  if (!response.ok) {
+    throw new Error(`Submit failed: ${JSON.stringify(json)}`);
+  }
+
+  return json as SubmitResponse;
+}
+
+async function runSponsoredViaApi(
+  type: 'verifying' | 'erc20',
+): Promise<CompareRow> {
+  console.log(`\n=== ${type.toUpperCase()} SPONSOR ===\n`);
+
+  const start = Date.now();
+
+  const prepared = await callPrepare(type);
+  const unsignedUserOp = prepared?.unsignedUserOp?.userOp;
+
+  if (!unsignedUserOp) {
+    throw new Error(
+      `Prepare response missing unsignedUserOp.userOp for ${type}`,
+    );
+  }
+  console.log(`[${type}] prepared nonce:`, unsignedUserOp.nonce);
+  console.log(`[${type}] prepared sender:`, unsignedUserOp.sender);
+  console.log(`[${type}] prepared paymaster:`, unsignedUserOp.paymaster);
+  console.log(`[${type}] prepared factory:`, unsignedUserOp.factory);
+  const signedUserOp = await signUserOperation(unsignedUserOp);
+  const submitResult = await apiSubmitUserOp(signedUserOp);
+  console.log(`[${type}] signed nonce:`, signedUserOp.nonce);
+  console.log(`[${type}] signed sender:`, signedUserOp.sender);
+  console.log(`[${type}] signed paymaster:`, signedUserOp.paymaster);
+  console.log(`[${type}] signed factory:`, signedUserOp.factory);
+  console.log(`[${type}] signed signature:`, signedUserOp.signature);
+
+  if (submitResult.error) {
+    throw new Error(`${type} submit failed: ${submitResult.error}`);
+  }
+
+  if (!submitResult.txHash) {
+    throw new Error(`${type} txHash is null`);
+  }
+
+  const receipt = await publicClient.getTransactionReceipt({
+    hash: submitResult.txHash,
+  });
+
+  const latencyMs = Date.now() - start;
+  const parsed = parseReceipt(receipt);
+  console.log(`[${type}] nonce:`, unsignedUserOp.nonce);
 
   return {
-    userOpHash,
-    txHash,
+    mode: type,
+    txHash: submitResult.txHash,
+    latencyMs,
+    ...parsed,
   };
 }
 
@@ -419,80 +450,13 @@ async function logNativeBalance() {
   console.log('wei:', balance.toString());
   console.log('token:', Number(balance) / 1e18);
 }
+
 async function runVerifying(): Promise<CompareRow> {
-  console.log('\n=== VERIFYING SPONSOR ===\n');
-
-  const { kernelClient } = await createSigningKernelClient();
-  const start = Date.now();
-
-  const transferCall = {
-    to: ERC20_TOKEN,
-    data: buildTransferData(),
-    value: 0n,
-  };
-
-  const userOpHash = await (kernelClient as any).sendUserOperation({
-    callData: await (kernelClient.account as any).encodeCalls([transferCall]),
-  });
-
-  const receiptOp = await waitForUserOperationReceipt(userOpHash);
-  const txHash = receiptOp?.receipt?.transactionHash;
-
-  if (!txHash) {
-    throw new Error('Verifying txHash is null');
-  }
-
-  const receipt = await publicClient.getTransactionReceipt({
-    hash: txHash,
-  });
-
-  const latencyMs = Date.now() - start;
-  const parsed = parseReceipt(receipt);
-
-  return {
-    mode: 'verifying',
-    txHash,
-    latencyMs,
-    ...parsed,
-  };
+  return runSponsoredViaApi('verifying');
 }
 
 async function runErc20(): Promise<CompareRow> {
-  console.log('\n=== ERC20 SPONSOR ===\n');
-
-  const { kernelClient } = await createErc20KernelClient();
-  const start = Date.now();
-
-  const transferCall = {
-    to: ERC20_TOKEN,
-    data: buildTransferData(),
-    value: 0n,
-  };
-
-  const userOpHash = await (kernelClient as any).sendUserOperation({
-    callData: await (kernelClient.account as any).encodeCalls([transferCall]),
-  });
-
-  const receiptOp = await waitForUserOperationReceipt(userOpHash);
-  const txHash = receiptOp?.receipt?.transactionHash;
-
-  if (!txHash) {
-    throw new Error('ERC20 sponsor txHash is null');
-  }
-
-  const receipt = await publicClient.getTransactionReceipt({
-    hash: txHash,
-  });
-
-  const latencyMs = Date.now() - start;
-  const parsed = parseReceipt(receipt);
-
-  return {
-    mode: 'erc20',
-    txHash,
-    latencyMs,
-    ...parsed,
-  };
+  return runSponsoredViaApi('erc20');
 }
 
 function ensureCSVHeader() {
@@ -576,6 +540,7 @@ async function main() {
 
     try {
       results.push(await runVerifying());
+      await sleep(5000);
     } catch (e) {
       console.error('verifying failed', e);
     }
