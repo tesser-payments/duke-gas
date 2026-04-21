@@ -707,6 +707,23 @@ console.log("encodedCallData =", encoded);
 
       addLog("Calling /sponsorships/prepare ...");
       
+      console.log(
+        "prepare request body =",
+        JSON.stringify({
+          chainId: currentChain.chainId,
+          from: walletAddress,
+          sender,
+          nonce: sdkNonceHex,
+          factory: factory || undefined,
+          factoryData: factoryData || undefined,
+          to,
+          data,
+          value,
+          callData: encoded,
+          type,
+        }, null, 2)
+      );
+      
       const res = await fetch(`${API_BASE_URL}/sponsorships/prepare`, {
         method: "POST",
         headers: {
