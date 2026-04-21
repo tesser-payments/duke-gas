@@ -1,6 +1,12 @@
-import { IsIn, IsOptional, IsString } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, ValidateIf } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class PrepareDto {
+  @Type(() => Number)
+  @IsInt()
+  @IsIn([137, 8453])
+  chainId!: 137 | 8453;
+
   @IsString()
   from!: string;
 
@@ -32,7 +38,11 @@ export class PrepareDto {
   callData?: `0x${string}`;
 
   @IsOptional()
-  nonce?: number;
+  @ValidateIf((_, value) => typeof value === 'string')
+  @IsString()
+  @ValidateIf((_, value) => typeof value === 'number')
+  @Type(() => Number)
+  nonce?: string | number;
 
   @IsOptional()
   @IsString()

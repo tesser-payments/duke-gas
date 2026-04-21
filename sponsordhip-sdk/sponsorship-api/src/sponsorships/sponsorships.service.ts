@@ -14,9 +14,25 @@ export class SponsorshipsService {
       ),
     );
   }
+  private readonly POLYGON_ERC20_PAYMASTER = process.env
+    .POLYGON_ERC20_PAYMASTER as `0x${string}` | undefined;
 
   async prepare(body: PrepareDto) {
-    const prepared = await this.zeroDevService.prepareUserOp(body);
+    const prepared = await this.zeroDevService.prepareUserOp({
+      chainId: body.chainId,
+      from: body.from,
+      sender: body.sender,
+      factory: body.factory as `0x${string}` | undefined,
+      factoryData: body.factoryData as `0x${string}` | undefined,
+      to: body.to as `0x${string}` | undefined,
+      data: body.data,
+      value: body.value,
+      nonce: body.nonce,
+      gasLimit: body.gasLimit,
+      gasPrice: body.gasPrice,
+      callData: body.callData,
+      type: body.type,
+    });
 
     return this.serializeBigInt({
       message: 'prepare endpoint works',
@@ -26,6 +42,9 @@ export class SponsorshipsService {
   }
 
   async submit(body: SubmitDto) {
-    return this.zeroDevService.submitUserOp(body.signedUserOp);
+    return this.zeroDevService.submitUserOp({
+      chainId: body.chainId,
+      signedUserOp: body.signedUserOp,
+    });
   }
 }

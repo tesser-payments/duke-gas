@@ -1,6 +1,19 @@
-import { IsNotEmpty, IsObject, IsOptional, IsString } from 'class-validator';
+import {
+  IsIn,
+  IsInt,
+  IsNotEmpty,
+  IsObject,
+  IsOptional,
+  IsString,
+} from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class SubmitDto {
+  @Type(() => Number)
+  @IsInt()
+  @IsIn([137, 8453])
+  chainId!: 137 | 8453;
+
   @IsObject()
   @IsNotEmpty()
   signedUserOp!: {
