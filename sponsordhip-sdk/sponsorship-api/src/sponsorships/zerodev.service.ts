@@ -368,21 +368,19 @@ export class ZeroDevService {
         rawMaxPriorityFeePerGas: rawMaxPriorityFeePerGas.toString(),
       });
 
-      const bump = 120n;
+      const bump = 200n;
 
       maxFeePerGas = this.toHex((rawMaxFeePerGas * bump) / 100n);
       maxPriorityFeePerGas = this.toHex(
         (rawMaxPriorityFeePerGas * bump) / 100n,
       );
 
-      // 如果 ZeroDev gas price 為 0，使用鏈本身的 gas price
       if (rawMaxFeePerGas === 0n || rawMaxPriorityFeePerGas === 0n) {
         console.log('[ZeroDev gas price is 0, fetching from chain]');
 
         const publicClient = this.getPublicClient(chainId);
         const chainGasPrice = await publicClient.getGasPrice();
 
-        // Base 鏈通常使用 EIP-1559，設置合理的 gas price
         const baseGasPrice = chainGasPrice;
         const priorityFee = chainGasPrice / 10n; // 10% as priority fee
 
@@ -410,19 +408,16 @@ export class ZeroDevService {
     console.log('[callData length]:', callData.length);
     console.log('[callData preview]:', callData.slice(0, 50) + '...');
 
-    // 驗證 callData 基本格式
     if (callData.length < 2 || !callData.startsWith('0x')) {
       throw new Error('Invalid callData format');
     }
 
-    // 檢查是否為空 callData (只有 0x)
     if (callData === '0x') {
       console.warn(
         '[callData] WARNING: Empty callData - this might cause simulation issues',
       );
     }
 
-    // 檢查 callData 長度是否合理 (應該是偶數，因為每個字節是 2 個 hex 字符)
     if ((callData.length - 2) % 2 !== 0) {
       throw new Error('Invalid callData: odd number of hex characters');
     }
@@ -473,14 +468,12 @@ export class ZeroDevService {
       maxPriorityFeePerGas: userOp.maxPriorityFeePerGas,
     });
 
-    // 檢查帳戶是否已部署
     const publicClient = this.getPublicClient(chainId);
     const accountCode = await publicClient.getCode({
       address: userOp.sender as `0x${string}`,
     });
     const isDeployed = accountCode && accountCode !== '0x';
 
-    // 檢查帳戶餘額
     const balance = await publicClient.getBalance({
       address: userOp.sender as `0x${string}`,
     });
@@ -494,7 +487,6 @@ export class ZeroDevService {
       balanceETH: (Number(balance) / 1e18).toFixed(6),
     });
 
-    // 檢查 nonce 的構成
     const nonceBigInt = BigInt(userOp.nonce);
     const nonceKey = nonceBigInt >> BigInt(64);
     const nonceSequence = nonceBigInt & ((BigInt(1) << BigInt(64)) - BigInt(1));
@@ -506,7 +498,6 @@ export class ZeroDevService {
       isFirstTx: nonceSequence === 0n,
     });
 
-    // 計算預期的 gas 成本
     const estimatedGas =
       BigInt(userOp.callGasLimit || '21000') +
       BigInt(userOp.verificationGasLimit || '200000') +
@@ -552,7 +543,6 @@ export class ZeroDevService {
       throw new Error(`Sponsor request failed: ${sponsorError.message}`);
     }
 
-    // 🔥 關鍵檢查
     if (
       !sponsorResult ||
       !sponsorResult.paymaster ||
