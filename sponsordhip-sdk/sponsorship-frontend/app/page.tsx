@@ -1030,11 +1030,11 @@ addLog(`Submit success. txHash=${json.txHash}`);
           marginBottom: 20,
         }}
       >
-        <h2 style={{ fontSize: 20, marginBottom: 12 }}>1. 區塊鏈選擇</h2>
+        <h2 style={{ fontSize: 20, marginBottom: 12 }}>1. blockchain selection</h2>
 
         <div style={{ marginBottom: 16 }}>
           <label>
-            區塊鏈:
+            blockchain:
             <select
               value={selectedChain}
               onChange={(e) => {
@@ -1083,7 +1083,7 @@ addLog(`Submit success. txHash=${json.txHash}`);
         </div>
 
         <div style={{ marginTop: 12 }}>
-          <strong>當前鏈:</strong>{" "}
+          <strong>Current Chain:</strong>{" "}
           {currentChain.label} (ID: {currentChain.chainId})
         </div>
 
