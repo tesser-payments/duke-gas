@@ -7,6 +7,7 @@ import {
   createWalletClient,
   custom,
   http,
+  encodeFunctionData,
 } from "viem";
 import { polygon, base } from "viem/chains";
 
@@ -116,6 +117,23 @@ const API_BASE_URL =
 
 const API_KEY = process.env.NEXT_PUBLIC_API_KEY || "";
 
+const POLYGON_USDC = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359" as Address;
+
+const ERC20_TRANSFER_ABI = [
+  {
+    type: "function",
+    name: "transfer",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "to", type: "address" },
+      { name: "amount", type: "uint256" },
+    ],
+    outputs: [{ name: "", type: "bool" }],
+  },
+] as const;
+
+const DEMO_USDC_AMOUNT = BigInt(1); 
+
 export default function Page() {
   const [selectedChain, setSelectedChain] = useState<string>("polygon");
   const [walletAddress, setWalletAddress] = useState<Address | null>(null);
@@ -124,9 +142,9 @@ export default function Page() {
   const [factory, setFactory] = useState("");
 const [factoryData, setFactoryData] = useState("");
 
-  const [to, setTo] = useState("");
-  const [data, setData] = useState("0x");
-  const [ value, setValue ] = useState( "0x0" );
+  const [recipient, setRecipient] = useState("");
+const [data, setData] = useState("0x"); 
+const [value, setValue] = useState("0x0");
   const [encodedCallData, setEncodedCallData] = useState<Hex | "">("");
 
   const [preparedUserOp, setPreparedUserOp] = useState<PreparedUserOp | null>(null);
@@ -139,12 +157,16 @@ const [factoryData, setFactoryData] = useState("");
   const [loadingConnect, setLoadingConnect] = useState(false);
   const [loadingDeriveSender, setLoadingDeriveSender] = useState(false);
   const [loadingPrepare, setLoadingPrepare] = useState(false);
-const [loadingSign, setLoadingSign] = useState(false);
-const [loadingSubmit, setLoadingSubmit] = useState(false);
-const [loadingDeployFirstTx, setLoadingDeployFirstTx] = useState(false);
-const [firstTxSent, setFirstTxSent] = useState(false);
+  const [loadingSign, setLoadingSign] = useState(false);
+  const [loadingSubmit, setLoadingSubmit] = useState(false);
+  const [loadingDeployFirstTx, setLoadingDeployFirstTx] = useState(false);
+  const [firstTxSent, setFirstTxSent] = useState(false);
 
-  const [logs, setLogs] = useState<string[]>([]);
+  const [ logs, setLogs ] = useState<string[]>( [] );
+  const [prepareRequestBody, setPrepareRequestBody] = useState("");
+  const [prepareResponseBody, setPrepareResponseBody] = useState("");
+  const [submitRequestBody, setSubmitRequestBody] = useState("");
+  const [submitResponseBody, setSubmitResponseBody] = useState("");
 
   const prettyPrepared = useMemo(
   () =>
@@ -178,16 +200,21 @@ const [firstTxSent, setFirstTxSent] = useState(false);
   }
 
   function resetFlowAfterWalletChange() {
-  setSender("");
-  setFactory("");
-  setFactoryData("");
-  setEncodedCallData("");
-  setPreparedUserOp(null);
-  setSignedUserOp(null);
-  setUserOpHash("");
-  setTxHash("");
-  setLastSubmittedNonce("");
-}
+    setSender("");
+    setFactory("");
+    setFactoryData("");
+    setEncodedCallData("");
+    setPreparedUserOp(null);
+    setSignedUserOp(null);
+    setUserOpHash("");
+    setTxHash("");
+    setLastSubmittedNonce("");
+
+    setPrepareRequestBody("");
+    setPrepareResponseBody("");
+    setSubmitRequestBody("");
+    setSubmitResponseBody("");
+  }
 
   function resetFlowAfterChainChange(nextChainKey: string) {
   resetFlowAfterWalletChange();
@@ -439,7 +466,7 @@ addLog(`Derived sender: ${kernelAccount.address}`);
       throw new Error("This flow is only for Base first transaction with factory/factoryData.");
     }
 
-    if (!to) {
+    if (!recipient) {
       throw new Error("Please enter the target address.");
     }
 
@@ -455,11 +482,11 @@ addLog(`Derived sender: ${kernelAccount.address}`);
       );
     }
 
-    const result = await kernelClient.sendTransaction({
-      to: to as Address,
-      data: (data || "0x") as Hex,
-      value: BigInt(value || "0x0"),
-    });
+    /*const result = await kernelClient.sendTransaction({
+  to: to as Address,
+  data: (data || "0x") as Hex,
+  value: BigInt(value || "0x0"),
+});
 
     const resultString = typeof result === "string" ? result : JSON.stringify(result);
 
@@ -468,7 +495,7 @@ addLog(`Derived sender: ${kernelAccount.address}`);
 
     addLog(`First Base self-paid transaction sent: ${resultString}`);
     addLog("Wait for confirmation, then click Derive Sender again.");
-    addLog("If Factory / FactoryData disappear, return to normal sponsor flow.");
+    addLog("If Factory / FactoryData disappear, return to normal sponsor flow.");*/
   } catch (error: any) {
     console.error("handleDeployFirstBaseTx error:", error);
     addLog(`Deploy first tx error: ${error?.message || String(error)}`);
@@ -539,7 +566,7 @@ const kernelAccount = await createKernelAccount(publicClient as any, {
   },
 } );
       
-      // 檢查 sender 的 USDC balance
+    
       const usdcAbi = [
         {
           type: "function",
@@ -558,12 +585,25 @@ const kernelAccount = await createKernelAccount(publicClient as any, {
       });
       
       console.log("sender usdc balance raw =", usdcBalance.toString());
-      addLog(`Sender USDC raw balance = ${usdcBalance.toString()}`);
+      addLog( `Sender USDC raw balance = ${ usdcBalance.toString() }` );
+      if (!recipient) {
+  throw new Error("Please enter the recipient wallet address.");
+}
+
+const usdcTransferData = encodeFunctionData({
+  abi: ERC20_TRANSFER_ABI,
+  functionName: "transfer",
+  args: [recipient as Address, DEMO_USDC_AMOUNT],
+});
+
+setData(usdcTransferData);
+setValue( "0x0" );
+
 
 const userCall = {
-  to: to as Address,
-  data: (data || "0x") as Hex,
-  value: BigInt(value || "0x0"),
+  to: POLYGON_USDC,
+  data: usdcTransferData,
+  value: BigInt(0),
 };
 
 let calls: Array<{
@@ -620,7 +660,9 @@ addLog(`Calls count before encode = ${calls.length}`);
 const encoded = await kernelAccount.encodeCalls(calls);
 console.log("encoded length =", encoded.length);
 addLog(`Encoded callData length = ${encoded.length}`);
-      console.log("typeof kernelAccount.getNonce =", typeof (kernelAccount as any).getNonce);
+console.log( "typeof kernelAccount.getNonce =", typeof ( kernelAccount as any ).getNonce );
+      
+
 
 if (typeof (kernelAccount as any).getNonce !== "function") {
   throw new Error("kernelAccount.getNonce() is not available");
@@ -686,12 +728,29 @@ console.log("sdkNonceHex =", sdkNonceHex);
 
 
 
-      console.log( "sdkNonceHex =", sdkNonceHex );
-      console.log("sender used for sdkNonce =", kernelAccount.address);
+console.log( "sdkNonceHex =", sdkNonceHex );
+console.log("sender used for sdkNonce =", kernelAccount.address);
 console.log("selected type =", type);
 console.log("factory =", factory);
 console.log("factoryData =", factoryData);
-addLog(`SDK nonce = ${sdkNonceHex}`);
+addLog( `SDK nonce = ${ sdkNonceHex }` );
+      
+const preparePayload = {
+  chainId: currentChain.chainId,
+  from: walletAddress,
+  sender,
+  nonce: sdkNonceHex,
+  factory: factory || undefined,
+  factoryData: factoryData || undefined,
+  to: POLYGON_USDC,
+  data: usdcTransferData,
+  value: "0x0",
+  callData: encoded,
+  type,
+};
+
+setPrepareRequestBody(JSON.stringify(preparePayload, null, 2));
+setPrepareResponseBody("");
       
     
 
@@ -705,56 +764,30 @@ console.log("encodedCallData =", encoded);
   return;
 }
 
-      addLog("Calling /sponsorships/prepare ...");
+addLog("Calling /sponsorships/prepare ...");
       
-      console.log(
-        "prepare request body =",
-        JSON.stringify({
-          chainId: currentChain.chainId,
-          from: walletAddress,
-          sender,
-          nonce: sdkNonceHex,
-          factory: factory || undefined,
-          factoryData: factoryData || undefined,
-          to,
-          data,
-          value,
-          callData: encoded,
-          type,
-        }, null, 2)
-      );
+console.log("prepare request body =", JSON.stringify(preparePayload, null, 2));
       
-      const res = await fetch(`${API_BASE_URL}/sponsorships/prepare`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-API-KEY": API_KEY,
-        },
+const res = await fetch(`${API_BASE_URL}/sponsorships/prepare`, {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    "X-API-KEY": API_KEY,
+  },
         
-        body: JSON.stringify({
-  chainId: currentChain.chainId,
-  from: walletAddress,
-  sender,
-  nonce: sdkNonceHex,
-  factory: factory || undefined,
-  factoryData: factoryData || undefined,
-  to,
-  data,
-  value,
-  callData: encoded,
-  type,
-}),
+   body: JSON.stringify(preparePayload),
       });
 
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`Prepare failed: ${text}`);
-      }
-
-     const rawText = await res.text();
+  if (!res.ok) {
+    const text = await res.text();
+    setPrepareResponseBody(text);
+    throw new Error(`Prepare failed: ${text}`);
+  }
+const rawText = await res.text();
 console.log("prepare raw response text =", rawText);
 
 const json = JSON.parse(rawText);
+setPrepareResponseBody(JSON.stringify(json, null, 2));
 console.log("prepare parsed json =", json);
 console.log("prepare parsed json keys =", Object.keys(json || {}));
 console.log("prepare parsed json.userOp =", json?.userOp);
@@ -773,9 +806,10 @@ if (!prepared) {
 
 setPreparedUserOp(prepared);
 
-console.log("input to =", to);
-console.log("input data =", data);
-console.log("input value =", value);
+console.log("recipient =", recipient);
+console.log("usdc contract =", POLYGON_USDC);
+console.log("usdc transfer data =", usdcTransferData);
+console.log("value =", "0x0");
 console.log("encodedCallData sent =", encoded);
 console.log("prepared userOp =", prepared);
 console.log("prepared userOp.callData =", prepared.callData);
@@ -964,6 +998,20 @@ async function handleSubmit() {
       ...cleanUserOp
     } = signedUserOp as any;
 
+    const submitPayload = {
+  chainId: currentChain.chainId,
+  signedUserOp: cleanUserOp,
+};
+
+setSubmitRequestBody(
+  JSON.stringify(
+    submitPayload,
+    (_, value) => (typeof value === "bigint" ? value.toString() : value),
+    2
+  )
+);
+setSubmitResponseBody("");
+
     const res = await fetch(`${API_BASE_URL}/sponsorships/submit`, {
       method: "POST",
       headers: {
@@ -971,10 +1019,7 @@ async function handleSubmit() {
         "X-API-KEY": API_KEY,
       },
       body: JSON.stringify(
-        {
-          chainId: currentChain.chainId,
-          signedUserOp: cleanUserOp,
-        },
+        submitPayload,
         (_, value) => (typeof value === "bigint" ? value.toString() : value)
       ),
     });
@@ -982,10 +1027,12 @@ async function handleSubmit() {
     const text = await res.text();
 
     if (!res.ok) {
+      setSubmitResponseBody(text);
       throw new Error(`Submit failed: ${text}`);
     }
 
     const json: SubmitResponse = JSON.parse(text);
+    setSubmitResponseBody(JSON.stringify(json, null, 2));
 
     if (json.error) {
       throw new Error(json.error);
@@ -1125,41 +1172,44 @@ addLog(`Submit success. txHash=${json.txHash}`);
             >
               <option value="verifying">verifying</option>
               <option value="erc20">erc20</option>
+              
             </select>
           </label>
         </div>
 
+        <div style={{ marginTop: 12 }}>
+  <strong>Demo Amount:</strong> 0.000001 USDC
+</div>
+
         <div style={{ display: "grid", gap: 12 }}>
           <label>
-            To
-            <input
-              value={to}
-              onChange={(e) => setTo(e.target.value)}
-              placeholder="0x..."
-              style={{ width: "100%", padding: 10, marginTop: 6 }}
-            />
-          </label>
+  Recipient Wallet
+  <input
+    value={recipient}
+    onChange={(e) => setRecipient(e.target.value)}
+    placeholder="0x..."
+    style={{ width: "100%", padding: 10, marginTop: 6 }}
+  />
+</label>
 
           <label>
-            Data
-            <textarea
-              value={data}
-              onChange={(e) => setData(e.target.value)}
-              placeholder="0x..."
-              rows={6}
-              style={{ width: "100%", padding: 10, marginTop: 6 }}
-            />
-          </label>
+  USDC Transfer Data (auto-generated)
+  <textarea
+    value={data}
+    readOnly
+    rows={6}
+    style={{ width: "100%", padding: 10, marginTop: 6, background: "#f6f6f6" }}
+  />
+</label>
 
           <label>
-            Value
-            <input
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              placeholder="0x0"
-              style={{ width: "100%", padding: 10, marginTop: 6 }}
-            />
-          </label>
+  Value
+  <input
+    value={value}
+    readOnly
+    style={{ width: "100%", padding: 10, marginTop: 6, background: "#f6f6f6" }}
+  />
+</label>
         </div>
 
         <div style={{ marginTop: 16 }}>
@@ -1242,6 +1292,49 @@ addLog(`Submit success. txHash=${json.txHash}`);
 
 <div style={{ marginTop: 12 }}>
   <strong>Factory Data:</strong> {factoryData ? `${factoryData.slice(0, 42)}...` : "None"}
+      </div>
+      
+      <div
+  style={{
+    border: "1px solid #ddd",
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+  }}
+>
+  <h2 style={{ fontSize: 20, marginBottom: 12 }}>Prepare API</h2>
+
+  <div style={{ marginBottom: 16 }}>
+    <strong>Request Body</strong>
+    <pre
+      style={{
+        background: "#f6f6f6",
+        padding: 12,
+        borderRadius: 8,
+        overflowX: "auto",
+        whiteSpace: "pre-wrap",
+        wordBreak: "break-word",
+      }}
+    >
+      {prepareRequestBody || "No prepare request yet."}
+    </pre>
+  </div>
+
+  <div>
+    <strong>Response Body</strong>
+    <pre
+      style={{
+        background: "#f6f6f6",
+        padding: 12,
+        borderRadius: 8,
+        overflowX: "auto",
+        whiteSpace: "pre-wrap",
+        wordBreak: "break-word",
+      }}
+    >
+      {prepareResponseBody || "No prepare response yet."}
+    </pre>
+  </div>
 </div>
 
       <div
@@ -1266,6 +1359,49 @@ addLog(`Submit success. txHash=${json.txHash}`);
           {prettyPrepared || "No prepared userOp yet."}
         </pre>
       </div>
+
+      <div
+  style={{
+    border: "1px solid #ddd",
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+  }}
+>
+  <h2 style={{ fontSize: 20, marginBottom: 12 }}>Submit API</h2>
+
+  <div style={{ marginBottom: 16 }}>
+    <strong>Request Body</strong>
+    <pre
+      style={{
+        background: "#f6f6f6",
+        padding: 12,
+        borderRadius: 8,
+        overflowX: "auto",
+        whiteSpace: "pre-wrap",
+        wordBreak: "break-word",
+      }}
+    >
+      {submitRequestBody || "No submit request yet."}
+    </pre>
+  </div>
+
+  <div>
+    <strong>Response Body</strong>
+    <pre
+      style={{
+        background: "#f6f6f6",
+        padding: 12,
+        borderRadius: 8,
+        overflowX: "auto",
+        whiteSpace: "pre-wrap",
+        wordBreak: "break-word",
+      }}
+    >
+      {submitResponseBody || "No submit response yet."}
+    </pre>
+  </div>
+</div>
 
       <div
         style={{
